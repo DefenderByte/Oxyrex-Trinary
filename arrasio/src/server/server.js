@@ -1301,7 +1301,20 @@ class Gun {
                 false : info.PROPERTIES.SYNCS_SKILLS;
             this.negRecoil = (info.PROPERTIES.NEGATIVE_RECOIL == null) ?
                 false : info.PROPERTIES.NEGATIVE_RECOIL;
-        }                    
+            this.shootOnDeath = (info.PROPERTIES.SHOOT_ON_DEATH == null) ?
+                false : info.PROPERTIES.SHOOT_ON_DEATH;
+        }
+	if (info.COLOR_SETTINGS != null) {
+            if (info.COLOR_SETTINGS.COLOR != null && info.COLOR_SETTINGS != null) {
+                this.color = info.COLOR_SETTINGS.COLOR
+            }
+            if (info.COLOR_SETTINGS.SKIN != null && info.COLOR_SETTINGS != null) {
+                this.skin = info.COLOR_SETTINGS.SKIN
+            }
+            if (info.COLOR_SETTINGS.COLOR_UNMIX != null && info.COLOR_SETTINGS != null) {
+                this.color_unmix = info.COLOR_SETTINGS.COLOR_UNMIX
+            }
+        }
         let position = info.POSITION;
         this.length = position[0] / 10;
         this.width = position[1] / 10;
@@ -1375,7 +1388,7 @@ class Gun {
                     this.body.maxChildren > this.body.children.length * ((this.calculator == 'necro') ? sk.rld : 1)
                 : true;                
             // Override in invuln
-            if (this.body.master.invuln) {
+            if (this.body.master.invuln || this.shootOnDeath) {
                 shootPermission = false;
             }
             // Cycle up if we should
@@ -1626,6 +1639,27 @@ var bringToLife = (() => {
         if (my.settings.attentionCraver && !faucet.main && my.range) {
             my.range -= 1;
         }
+	// Invisibility
+        if (my.invisible[1]) {
+            if (my.invisible[2] <= my.alpha && my.alpha >= 0) {
+                my.alpha = Math.max(0.01, my.alpha - my.invisible[1]);
+            }
+            if (my.invisible[0] != 3) {
+                if (!(my.velocity.x * my.velocity.x + my.velocity.y * my.velocity.y < 0.15 * 0.15) || my.damageRecieved)
+                    my.alpha = Math.min(1, my.alpha + my.invisible[0]);
+            } else {
+                if (my.hit == 1) {
+                    my.alpha = 1
+                } else {
+                    if (my.invisible[2] <= my.alpha && my.alpha >= 0) {
+                        my.alpha = Math.max(0.01, my.alpha - my.invisible[1])
+                    }
+                }
+            }
+            if (my.invisible[0] == 2) {
+                my.alpha = my.invisible[2]
+            }
+        };
         // So we start with my master's thoughts and then we filter them down through our control stack
         my.controllers.forEach(AI => {
             let a = AI.think(b);
@@ -1799,6 +1833,9 @@ class Entity {
         this.damp = 0.05;
         this.collisionArray = [];
         this.invuln = false;
+	this.alpha = 1;
+        this.hit = 0;
+        this.invisible = [0, 0, 0];
         // Get a new unique id
         this.id = entitiesIdLog++;
         this.team = this.id;
@@ -1930,6 +1967,9 @@ class Entity {
         if (set.PERSISTS_AFTER_DEATH != null) { 
             this.settings.persistsAfterDeath = set.PERSISTS_AFTER_DEATH; 
         }
+	if (set.FRAG != null) {
+            this.settings.frag = set.FRAG;
+        }
         if (set.CLEAR_ON_MASTER_UPGRADE != null) { 
             this.settings.clearOnMasterUpgrade = set.CLEAR_ON_MASTER_UPGRADE; 
         }
@@ -1978,6 +2018,12 @@ class Entity {
         if (set.AI != null) { 
             this.aiSettings = set.AI; 
         }
+	if (set.ALPHA != null) { 
+            this.alpha = set.ALPHA;
+        }
+        if (set.INVISIBLE != null) { 
+            this.invisible = set.INVISIBLE;
+        }
         if (set.DANGER != null) { 
             this.dangerValue = set.DANGER; 
         }
@@ -2001,6 +2047,11 @@ class Entity {
         if (set.UPGRADES_TIER_3 != null) { 
             set.UPGRADES_TIER_3.forEach((e) => {
                 this.upgrades.push({ class: e, level: c.TIER_3, index: e.index,});
+            });
+        }
+	if (set.UPGRADES_TIER_4 != null) { 
+            set.UPGRADES_TIER_4.forEach((e) => {
+                this.upgrades.push({ class: e, level: c.TIER_4, index: e.index });
             });
         }
         if (set.SIZE != null) {
@@ -2361,6 +2412,15 @@ class Entity {
         case 'autospin':
             this.facing += 0.02 / roomSpeed;
             break;
+        case 'reverseautospin':
+            this.facing -= 0.02 / roomSpeed;
+            break;
+        case 'fastautospin':
+            this.facing += 0.05 / roomSpeed;
+            break;
+        case 'fastverseautospin':
+            this.facing -= 0.05 / roomSpeed;
+            break;
         case 'turnWithSpeed':
             this.facing += this.velocity.length / 90 * Math.PI / roomSpeed;
             break;
@@ -2504,6 +2564,30 @@ class Entity {
 
         // Check for death
         if (this.isDead()) {
+	    //Shoot on death
+            this.guns.forEach(gun => {
+                if (gun.shootOnDeath) {
+                    // get Skills
+                    let sk =
+                        gun.bulletStats === "master" ? gun.body.skill : gun.bulletStats;
+                    this.canShoot = true;
+                    // Find the end of the gun
+                    if (gun.body != null) {
+                        let gx =
+                            gun.offset *
+                            Math.cos(gun.direction + gun.angle + gun.body.facing) +
+                            (1.5 * gun.length - (gun.width * gun.settings.size) / 2) *
+                            Math.cos(gun.angle + gun.body.facing);
+                        let gy =
+                            gun.offset *
+                            Math.sin(gun.direction + gun.angle + gun.body.facing) +
+                            (1.5 * gun.length - (gun.width * gun.settings.size) / 2) *
+                            Math.sin(gun.angle + gun.body.facing);
+                        // FIRE!
+                        gun.fire(gx, gy, sk);
+                    }
+                }
+            })
             // Initalize message arrays
             let killers = [], killTools = [], notJustFood = false;
             // If I'm a tank, call me a nameless player
@@ -2583,6 +2667,25 @@ class Entity {
                 }
                 sockets.broadcast(usurptText);
             }
+	    if (this.settings.frag && (!this.dedByRange || !this.settings.fragile)) {
+                    if (Array.isArray(this.settings.frag)) {
+                        for (let e of this.settings.frag) {
+                            let o = new Entity({ x: this.x, y: this.y, });
+                            o.team = -100;
+                            if (Array.isArray(e)) {
+                                e.forEach(ee => o.define(ee));
+                            } else {
+                                o.define(e);
+                                o.color = this.color;
+                            }
+                        }
+                    } else {
+                        let o = new Entity({ x: this.x, y: this.y, });
+                        o.team = this.team;
+                        o.color = this.color;
+                        o.define(this.settings.frag);
+                    }
+                }
             // Kill it
             return 1;
         } 
@@ -2747,6 +2850,9 @@ var express = require('express'),
                     out.direction = rounder(t.bound.direction);
                     out.layer = rounder(t.bound.layer);
                     out.angle = rounder(t.bound.angle);
+		    out.color: rounder(t.bound.color),
+                    out.skin: rounder(t.bound.skin),
+                    out.color_unmix: rounder(t.bound.color_unmix),
                     return out;
                 }),
             };
@@ -4767,17 +4873,139 @@ var maintainloop = (() => {
             };
         })();
         return census => {
-            if (timer > 6000 && ran.dice(16000 - timer)) {
+            if (timer > 420 && ran.dice(900 - timer)) {
                 util.log('[SPAWN] Preparing to spawn...');
                 timer = 0;
                 let choice = [];
-                switch (ran.chooseChance(40, 1)) {
+                switch (ran.chooseChance(500, 450, 400, 350, 400, 360, 320, 280, 300, 200, 100, 50, 250, 150, 50, 25, 250, 400, 250, 400, 250, 20, 20, 20, 20, 20, 20, 240, 220, 200, 180)) {
                     case 0: 
-                        choice = [[Class.elite_destroyer], 2, 'a', 'nest'];
+                        choice = [[Class.elite_sprayer, Class.elite_destroyer, Class.elite_gunner], 1, 'a', 'nest'];
+                        sockets.broadcast('A stirring in the distance...');
                         break;
                     case 1: 
-                        choice = [[Class.palisade], 1, 'castle', 'norm']; 
+                        choice = [[Class.elite_sprayer, Class.elite_destroyer, Class.elite_gunner], 2, 'a', 'nest'];
+                        sockets.broadcast('A stirring in the distance...');
+                        break;
+                    case 2: 
+                        choice = [[Class.elite_sprayer, Class.elite_destroyer, Class.elite_gunner], 3, 'a', 'nest'];
+                        sockets.broadcast('A stirring in the distance...');
+                        break;
+                    case 3: 
+                        choice = [[Class.elite_sprayer, Class.elite_destroyer, Class.elite_gunner], 4, 'a', 'nest'];
+                        sockets.broadcast('A stirring in the distance...');
+                        break;
+                    case 4: 
+                        choice = [[Class.palisade, Class.skimboss], 1, 'castle', 'norm']; 
                         sockets.broadcast('A strange trembling...');
+                        break;
+                    case 5: 
+                        choice = [[Class.palisade, Class.skimboss], 2, 'castle', 'norm']; 
+                        sockets.broadcast('A strange trembling...');
+                        break;
+                    case 6: 
+                        choice = [[Class.palisade, Class.skimboss], 3, 'castle', 'norm']; 
+                        sockets.broadcast('A strange trembling...');
+                        break;
+                    case 7: 
+                        choice = [[Class.palisade, Class.skimboss], 4, 'castle', 'norm']; 
+                        sockets.broadcast('A strange trembling...');
+                        break;
+                    case 8: 
+                        choice = [[Class.dread, Class.octog], 1, 'poly', 'rock']; 
+                        sockets.broadcast('Influx Detected...');
+                        break;
+                    case 9: 
+                        choice = [[Class.dread, Class.octog], 2, 'poly', 'rock']; 
+                        sockets.broadcast('Influx Detected...');
+                        break;
+                    case 10: 
+                        choice = [[Class.dread, Class.octog], 3, 'poly', 'rock']; 
+                        sockets.broadcast('Influx Detected...');
+                        break;
+                    case 11: 
+                        choice = [[Class.dread, Class.octog], 4, 'poly', 'rock']; 
+                        sockets.broadcast('Influx Detected...');
+                        break;
+                    case 12: 
+                        choice = [[ran.choose([Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.custodian])], 1, 'woomy', 'nest']; 
+                        sockets.broadcast('A strange trembling...');
+                        break;
+                    case 13: 
+                        choice = [[ran.choose([Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.custodian])], 2, 'woomy', 'nest']; 
+                        sockets.broadcast('A strange trembling...');
+                        break;
+                    case 14: 
+                        choice = [[ran.choose([Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.custodian])], 3, 'woomy', 'nest']; 
+                        sockets.broadcast('A strange trembling...');
+                        break;
+                    case 15: 
+                        choice = [[ran.choose([Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.defend, Class.custodian])], 4, 'woomy', 'nest']; 
+                        sockets.broadcast('A strange trembling...');
+                        break;
+                    case 16: 
+                        choice = [[Class.krios_saucer], 1, 'kricel', 'nest']; 
+                        sockets.broadcast('Krios: I told you not to destroy my nest! Now you fools will PAY!');
+                        sockets.broadcast('Don\'t get... wait, no, correction: KRIOS has envisioned your arrival!');
+                        break;
+                    case 17: 
+                        choice = [[Class.rareSentrySwarm, Class.rareSentryGun, Class.rareSentryTrap, Class.namelessdefend_tethys], 10, 'poly', 'nest']; 
+                        sockets.broadcast('Tethys: I\'d rather be shiny... and I AM!');
+                        sockets.broadcast('Sentries unite... wait, no, correction: Prepare for a dazzling display of shininess!');
+                        break;
+                    case 18: 
+                        choice = [[Class.rareSentrySwarm, Class.rareSentryGun, Class.rareSentryTrap, Class.namelessdefend_tethys], 1, 'tetcel', 'nest']; 
+                        sockets.broadcast('Tethys: I\'d rather be shiny... and I AM! WAIT WHAT THE POLYGON IS THAT');
+                        sockets.broadcast('Prepare for a dazzling display of shininess! He has detected for some imbalance!');
+                        break;
+                    case 19: 
+                        choice = [[Class.triangleCascade], 10, 'poly', 'nest']; 
+                        sockets.broadcast('The Surge has arrived!');
+                        break;
+                    case 20: 
+                        choice = [[Class.mega_cascade], 1, 'mnecel', 'nest']; 
+                        sockets.broadcast('Dud lol why did i made this');
+                        sockets.broadcast('Mnemosyne: It\'s swarm time, puny tanks!'); // HAW
+                        sockets.broadcast('The Surge... wait, no, correction: Mnemosyne is ready, and has long been so...');
+                        break;
+                    case 21: 
+                        choice = [[Class.celestial_paladin], 1, 'palcel', 'rock']; 
+                        sockets.broadcast('The world tremors as the coke cassowaries reborn anew!');
+                        break;
+                    case 22: 
+                        choice = [[Class.celestial_freyja], 1, 'frecel', 'rock']; 
+                        sockets.broadcast('The world tremors as the coke cassowaries reborn anew!');
+                        break;
+                    case 23: 
+                        choice = [[Class.celestial_zaphkiel], 1, 'zapcel', 'rock']; 
+                        sockets.broadcast('The world tremors as the coke cassowaries reborn anew!');
+                        break;
+                    case 24: 
+                        choice = [[Class.celestial_artemis], 1, 'artcel', 'rock']; 
+                        sockets.broadcast('The world tremors as the coke cassowaries reborn anew!');
+                        break;
+                    case 25: 
+                        choice = [[Class.celestial_demeter], 1, 'demcel', 'rock']; 
+                        sockets.broadcast('The world tremors as the coke cassowaries reborn anew!');
+                        break;
+                    case 26: 
+                        choice = [[Class.celestial_odin], 1, 'odicel', 'rock']; 
+                        sockets.broadcast('The world tremors as the coke cassowaries reborn anew!');
+                        break;
+                    case 27: 
+                        choice = [[Class.fallen_booster], 1, 'woomy', 'rock']; 
+                        sockets.broadcast('Many had sought for the day when they\'d return... But not in this way...');
+                        break;
+                    case 28: 
+                        choice = [[Class.fallen_booster], 2, 'woomy', 'rock']; 
+                        sockets.broadcast('Many had sought for the day when they\'d return... But not in this way...');
+                        break;
+                    case 29: 
+                        choice = [[Class.fallen_booster], 3, 'woomy', 'rock']; 
+                        sockets.broadcast('Many had sought for the day when they\'d return... But not in this way...');
+                        break;
+                    case 30: 
+                        choice = [[Class.fallen_booster], 4, 'woomy', 'rock']; 
+                        sockets.broadcast('Many had sought for the day when they\'d return... But not in this way...');
                         break;
                 }
                 boss.prepareToSpawn(...choice);
@@ -4787,10 +5015,11 @@ var maintainloop = (() => {
         };
     })();
     let spawnCrasher = census => {
-        if (ran.chance(1 -  0.5 * census.crasher / room.maxFood / room.nestFoodAmount)) {
+        if (ran.chance(1 -  0.9875 * census.crasher / room.maxFood / room.nestFoodAmount)) {
             let spot, i = 30;
             do { spot = room.randomType('nest'); i--; if (!i) return 0; } while (dirtyCheck(spot, 100));
-            let type = (ran.dice(80)) ? ran.choose([Class.sentryGun, Class.sentrySwarm, Class.sentryTrap]) : Class.crasher;
+            let nest_defender = (ran.dice(100)) ? ran.choose([Class.nestdefend_krios, Class.nestdefend_tethys, Class.nestdefend_mnemosyne]) : ran.choose([Class.guardian_lite, Class.crasher_dasher, Class.crash_fighter, Class.caltrop_fighter, Class.baby_leviathan, Class.penta_sentry, Class.rareSentrySwarm, Class.rareSentryGun, Class.rareSentryTrap, Class.defend_lite, Class.triangleCascade]);
+            let type = (ran.dice(100)) ? ran.choose([Class.sentryGun, Class.sentrySwarm, Class.sentryTrap, Class.sentrySnipe, Class.eDestroyLite, Class.eGunnerLite, nest_defender]) : ran.choose([Class.crasher, Class.crasher, Class.crasher, Class.crasher, Class.crasher, Class.crasher, Class.crasher, Class.crasher, Class.crasher, Class.pentagonQuarsar]);
             let o = new Entity(spot);
                 o.define(type);
                 o.team = -100;
@@ -4825,27 +5054,145 @@ var maintainloop = (() => {
             // Spawning
             spawnCrasher(census);
             spawnBosses(census);
-            /*/ Bots
+            // Bots
                 if (bots.length < c.BOTS) {
                     let o = new Entity(room.random());
-                    o.color = 17;
-                    o.define(Class.bot);
-                    o.define(Class.basic);
+                    // o.color = ran.choose([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44]);
+                    o.define(ran.choose([Class.botT1, Class.botT1, Class.botT1, Class.botT1, Class.botT1, Class.botT1, Class.botT1, Class.botT1, Class.botT1, ran.choose([Class.botT2, Class.botT2, Class.botT2, Class.botT2, Class.botT2, Class.botT2, Class.botT2, Class.botT2, Class.botT2, ran.choose([Class.botT3_A, Class.botT3_B, Class.botT3_C, Class.botT3_D, Class.botT3_E])])]));
+                    o.define(
+                      ran.choose([
+                        Class.basic,
+                        Class.single,
+                        Class.pummeler,
+                        Class.smash,
+                        Class.megasmash,
+                        Class.mauler,
+                        Class.spike,
+                        Class.autopummeler,
+                        Class.autosmash,
+                        Class.twin,
+                        Class.gunner,
+                        Class.machinegunner,
+                        Class.autogunner,
+                        Class.nailgun,
+                        Class.double,
+                        Class.autodouble,
+                        Class.tripletwin,
+                        Class.split,
+                        Class.bent,
+                        Class.bentdouble,
+                        Class.penta,
+                        Class.benthybrid,
+                        Class.triple,
+                        Class.quint,
+                        Class.dual,
+                        Class.sniper,
+                        Class.assassin,
+                        Class.autoass,
+                        Class.ranger,
+                        Class.hunter,
+                        Class.preda,
+                        Class.poach,
+                        Class.rocketeer,
+                        Class.director,
+                        Class.overseer,
+                        Class.overlord,
+                        Class.master,
+                        Class.overtrap,
+                        Class.banshee,
+                        Class.autoover,
+                        Class.overgunner,
+                        Class.cruiser,
+                        Class.autocruiser,
+                        Class.battleship,
+                        Class.carrier,
+                        Class.fortress,
+                        Class.underseer,
+                        Class.autounderseer,
+                        Class.necromancer,
+                        Class.factory,
+                        Class.machine,
+                        Class.automachine,
+                        Class.spray,
+                        Class.mini,
+                        Class.automini,
+                        Class.stream,
+                        Class.hybridmini,
+                        Class.minitrap,
+                        Class.destroy,
+                        Class.autodestroy,
+                        Class.anni,
+                        Class.hiveshooter,
+                        Class.hybrid,
+                        Class.shotgun,
+                        Class.builder,
+                        Class.engineer,
+                        Class.construct,
+                        Class.autobuilder,
+                        Class.boomer,
+                        Class.artillery,
+                        Class.autoarty,
+                        Class.mortar,
+                        Class.skimmer,
+                        Class.spread,
+                        Class.flank,
+                        Class.hexa,
+                        Class.autohexa,
+                        Class.octo,
+                        Class.hexatrap,
+                        Class.tri,
+                        Class.booster,
+                        Class.fighter,
+                        Class.surfer,
+                        Class.bomber,
+                        Class.autotri,
+                        Class.falcon,
+                        Class.auto3,
+                        Class.auto5,
+                        Class.heavy3,
+                        Class.builder3,
+                        Class.sniper3,
+                        Class.machine3,
+                        Class.auto4,
+                        Class.flanktrap,
+                        Class.guntrap,
+                        Class.bushwhack,
+                        Class.twinbuilder,
+                        Class.hurricane,
+                        Class.weirdspike,
+                        Class.quadtrapper,
+                        Class.bentboomer,
+                        Class.ball,
+                        Class.op_anni,
+                        Class.eDestroy,
+                        Class.eGunner,
+                        Class.underranger,
+                        Class.bentHoming,
+                        Class.hybridflanktrap,
+                        Class.mini1,
+                        Class.ohmyfuckinggodIHAVENUKESSSSDSDSDSDSDSDSDS,
+                        Class.pellet,
+                        Class.hewn_pellet,
+                        Class.sail,
+                        Class.bore,
+                        Class.punt,
+                        Class.screw_punt
+                      ])
+                    );
                     o.name += ran.chooseBotName();
                     o.refreshBodyAttributes();
-                    o.color = 17;
+                    // o.color = ran.choose([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44]);
                     bots.push(o);
                 }
                 // Remove dead ones
                 bots = bots.filter(e => { return !e.isDead(); });
                 // Slowly upgrade them
                 bots.forEach(o => {
-                    if (o.skill.level < 45) {
+                    if (o.skill.level < 60) {
                         o.skill.score += 35;
                         o.skill.maintain();
                     }
                 });
-            */
         };
     })();
     // The big food function
@@ -4859,8 +5206,9 @@ var maintainloop = (() => {
                 case 1: a = Class.square; break;
                 case 2: a = Class.triangle; break;
                 case 3: a = Class.pentagon; break;
-                case 4: a = Class.bigPentagon; break;
-                case 5: a = Class.hugePentagon; break;
+                case 4: a = Class.hexagon; break;
+                case 5: a = Class.heptagon; break;
+                case 6: a = Class.octagon; break;
                 default: throw('bad food level');
             }
             if (a !== {}) {
@@ -4979,10 +5327,11 @@ var maintainloop = (() => {
                 [0]: 0, // Egg
                 [1]: 0, // Square
                 [2]: 0, // Triangle
-                [3]: 0, // Penta
-                [4]: 0, // Beta
-                [5]: 0, // Alpha
-                [6]: 0,
+                [3]: 0, // Pentagon
+                [4]: 0, // Hexagon
+                [5]: 0, // Heptagon
+                [6]: 0, // Octagon
+                [7]: 0,
                 tank: 0,
                 sum: 0,
             };
@@ -4990,10 +5339,11 @@ var maintainloop = (() => {
                 [0]: 0, // Egg
                 [1]: 0, // Square
                 [2]: 0, // Triangle
-                [3]: 0, // Penta
-                [4]: 0, // Beta
-                [5]: 0, // Alpha
-                [6]: 0,
+                [3]: 0, // Pentagon
+                [4]: 0, // Hexagon
+                [5]: 0, // Heptagon
+                [6]: 0, // Octagon
+                [7]: 0,
                 sum: 0,
             };
             // Do the censusNest
